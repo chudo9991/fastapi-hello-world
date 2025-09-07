@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  fastapi-app:
+    build: .
+    ports:
+      - "8000:8000"
+    container_name: fastapi-hello-world
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
