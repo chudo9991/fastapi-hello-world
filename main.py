@@ -88,6 +88,68 @@ async def root():
                 background: rgba(255, 215, 0, 0.4);
                 transform: translateY(-2px);
             }
+            .microphone-section {
+                background: rgba(255, 255, 255, 0.2);
+                padding: 20px;
+                margin: 20px 0;
+                border-radius: 10px;
+                border-left: 4px solid #FF6B6B;
+            }
+            .microphone-status {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin: 10px 0;
+            }
+            .status-indicator {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: #ccc;
+            }
+            .status-indicator.available {
+                background: #4CAF50;
+                box-shadow: 0 0 10px #4CAF50;
+            }
+            .status-indicator.denied {
+                background: #f44336;
+                box-shadow: 0 0 10px #f44336;
+            }
+            .status-indicator.checking {
+                background: #ff9800;
+                animation: pulse 1s infinite;
+            }
+            @keyframes pulse {
+                0% { opacity: 1; }
+                50% { opacity: 0.5; }
+                100% { opacity: 1; }
+            }
+            .mic-button {
+                background: linear-gradient(45deg, #FF6B6B, #FF8E8E);
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 1em;
+                transition: all 0.3s ease;
+                margin: 10px 5px;
+            }
+            .mic-button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+            }
+            .mic-button:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+                transform: none;
+                box-shadow: none;
+            }
+            .mic-info {
+                font-size: 0.9em;
+                opacity: 0.8;
+                margin-top: 10px;
+            }
         </style>
     </head>
     <body>
@@ -109,10 +171,150 @@ async def root():
                 <div class="description">Суммирует два числа. Принимает JSON: {"a": число1, "b": число2}</div>
             </div>
             
+            <div class="microphone-section">
+                <h3>🎤 Проверка микрофона</h3>
+                <div class="microphone-status">
+                    <div class="status-indicator" id="micStatus"></div>
+                    <span id="micStatusText">Статус микрофона неизвестен</span>
+                </div>
+                <button class="mic-button" id="checkMicBtn" onclick="checkMicrophone()">
+                    Проверить микрофон
+                </button>
+                <button class="mic-button" id="requestMicBtn" onclick="requestMicrophonePermission()" style="display: none;">
+                    Запросить разрешение
+                </button>
+                <div class="mic-info" id="micInfo">
+                    Нажмите "Проверить микрофон" для проверки доступности и разрешений
+                </div>
+            </div>
+            
             <div class="docs-link">
                 <a href="/docs" target="_blank">📚 Открыть документацию API</a>
             </div>
         </div>
+        
+        <script>
+            let mediaStream = null;
+            
+            // Функция для проверки доступности микрофона
+            async function checkMicrophone() {
+                const statusIndicator = document.getElementById('micStatus');
+                const statusText = document.getElementById('micStatusText');
+                const checkBtn = document.getElementById('checkMicBtn');
+                const requestBtn = document.getElementById('requestMicBtn');
+                const micInfo = document.getElementById('micInfo');
+                
+                // Показываем состояние "проверка"
+                statusIndicator.className = 'status-indicator checking';
+                statusText.textContent = 'Проверка доступности микрофона...';
+                checkBtn.disabled = true;
+                micInfo.textContent = 'Проверяем доступность микрофона...';
+                
+                try {
+                    // Проверяем поддержку getUserMedia
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('getUserMedia не поддерживается в этом браузере');
+                    }
+                    
+                    // Проверяем разрешения
+                    const permissionStatus = await navigator.permissions.query({ name: 'microphone' });
+                    
+                    if (permissionStatus.state === 'granted') {
+                        // Разрешение уже дано, проверяем доступность
+                        await testMicrophoneAccess();
+                        updateStatus('available', 'Микрофон доступен и разрешен', 'Микрофон готов к использованию');
+                        requestBtn.style.display = 'none';
+                    } else if (permissionStatus.state === 'denied') {
+                        // Разрешение отклонено
+                        updateStatus('denied', 'Доступ к микрофону запрещен', 'Разрешение на использование микрофона было отклонено. Проверьте настройки браузера.');
+                        requestBtn.style.display = 'none';
+                    } else {
+                        // Разрешение не запрашивалось
+                        updateStatus('denied', 'Требуется разрешение на микрофон', 'Нажмите "Запросить разрешение" для доступа к микрофону');
+                        requestBtn.style.display = 'inline-block';
+                    }
+                    
+                } catch (error) {
+                    console.error('Ошибка при проверке микрофона:', error);
+                    updateStatus('denied', 'Ошибка доступа к микрофону', `Ошибка: ${error.message}`);
+                    requestBtn.style.display = 'none';
+                } finally {
+                    checkBtn.disabled = false;
+                }
+            }
+            
+            // Функция для тестирования доступа к микрофону
+            async function testMicrophoneAccess() {
+                return new Promise((resolve, reject) => {
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(stream => {
+                            // Если получили поток, сразу его останавливаем
+                            stream.getTracks().forEach(track => track.stop());
+                            resolve();
+                        })
+                        .catch(reject);
+                });
+            }
+            
+            // Функция для запроса разрешения на микрофон
+            async function requestMicrophonePermission() {
+                const statusIndicator = document.getElementById('micStatus');
+                const statusText = document.getElementById('micStatusText');
+                const requestBtn = document.getElementById('requestMicBtn');
+                const micInfo = document.getElementById('micInfo');
+                
+                statusIndicator.className = 'status-indicator checking';
+                statusText.textContent = 'Запрос разрешения...';
+                requestBtn.disabled = true;
+                micInfo.textContent = 'Запрашиваем разрешение на использование микрофона...';
+                
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    // Если получили поток, значит разрешение дано
+                    updateStatus('available', 'Разрешение получено!', 'Микрофон готов к использованию');
+                    requestBtn.style.display = 'none';
+                    
+                    // Останавливаем поток, так как мы только проверяли разрешение
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                } catch (error) {
+                    console.error('Ошибка при запросе разрешения:', error);
+                    
+                    if (error.name === 'NotAllowedError') {
+                        updateStatus('denied', 'Разрешение отклонено', 'Пользователь отклонил запрос на доступ к микрофону');
+                    } else if (error.name === 'NotFoundError') {
+                        updateStatus('denied', 'Микрофон не найден', 'На устройстве не обнаружен микрофон');
+                    } else if (error.name === 'NotReadableError') {
+                        updateStatus('denied', 'Микрофон недоступен', 'Микрофон используется другим приложением');
+                    } else {
+                        updateStatus('denied', 'Ошибка доступа', `Ошибка: ${error.message}`);
+                    }
+                    requestBtn.style.display = 'none';
+                } finally {
+                    requestBtn.disabled = false;
+                }
+            }
+            
+            // Функция для обновления статуса
+            function updateStatus(status, text, info) {
+                const statusIndicator = document.getElementById('micStatus');
+                const statusText = document.getElementById('micStatusText');
+                const micInfo = document.getElementById('micInfo');
+                
+                statusIndicator.className = `status-indicator ${status}`;
+                statusText.textContent = text;
+                micInfo.textContent = info;
+            }
+            
+            // Автоматическая проверка при загрузке страницы
+            window.addEventListener('load', () => {
+                // Небольшая задержка для лучшего UX
+                setTimeout(() => {
+                    checkMicrophone();
+                }, 1000);
+            });
+        </script>
     </body>
     </html>
     """
